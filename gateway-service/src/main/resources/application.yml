@@ -32,3 +32,8 @@ management:
 # verify JWTs with this same HMAC key.
 jwt:
   secret: 8C+847MpsW3qHYF/6/7hrFPyxYwRuMzzbkoWVDUq1DE=
+
+api:
+  keys:
+    mobile-app-key-123: mobile-app
+    partner-x-key-456: partner-x
