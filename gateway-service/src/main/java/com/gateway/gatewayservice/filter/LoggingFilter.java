@@ -20,15 +20,10 @@ public class LoggingFilter implements GlobalFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         long startTime = System.currentTimeMillis();
-        //startTime is captured before chain.filter() runs, so the duration you log later covers the entire downstream pipeline — auth check, routing, the backend service's own response time, everything.//
 
         log.info("--> {} {} from {}",
                 request.getMethod(), request.getURI().getPath(), request.getRemoteAddress());
-/*chain.filter(exchange) returns a Mono<Void> that completes when
- the whole rest of the chain (every other filter plus the actual proxied call) is done. It's non-blocking — nothing here holds a thread while waiting.
- .then(Mono.fromRunnable(...)) schedules the "outgoing" log line to run after that
- Mono<Void> completes, regardless of whether the request succeeded or was rejected somewhere downstream (e.g. a 401 from your JWT filter). That's what makes this filter capture rejected requests too, not just successful ones.
- */
+
         return chain.filter(exchange).then(Mono.fromRunnable(() -> {
             long durationMs = System.currentTimeMillis() - startTime;
             ServerHttpResponse response = exchange.getResponse();
@@ -40,7 +35,6 @@ public class LoggingFilter implements GlobalFilter, Ordered {
 
     @Override
     public int getOrder() {
-        return -2; // lower than JwtAuthenticationFilter's -1, so this wraps it
+        return -3; // lowest of all - wraps every other filter
     }
 }
-

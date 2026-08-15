@@ -21,7 +21,6 @@ public class JwtUtil {
     private long expirationMs;
 
     private Key signingKey() {
-        // The secret is base64-encoded so it decodes to a proper 256-bit key for HS256.
         byte[] keyBytes = Decoders.BASE64.decode(secret);
         return Keys.hmacShaKeyFor(keyBytes);
     }

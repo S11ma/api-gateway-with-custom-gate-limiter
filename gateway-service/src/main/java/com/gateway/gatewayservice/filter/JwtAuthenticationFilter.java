@@ -21,17 +21,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.util.List;
 
-/**
- * Runs on every request that reaches the gateway, before routing happens.
- * Requests to /auth/** are allowed through untouched (you need to be able
- * to log in before you have a token to validate). Everything else must
- * carry a valid "Authorization: Bearer <token>" header.
- *
- * On success, the validated username and roles are forwarded to the
- * downstream service as headers - so order-service/product-service don't
- * need to know anything about JWTs, they just trust the gateway already
- * checked identity.
- */
 @Component
 public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
@@ -72,8 +61,6 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             @SuppressWarnings("unchecked")
             List<String> roles = claims.get("roles", List.class);
 
-            // Forward identity downstream as headers, so backend services
-            // can use it without re-parsing or re-validating the JWT.
             ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                     .header("X-Auth-Username", username)
                     .header("X-Auth-Roles", String.join(",", roles))
@@ -94,16 +81,12 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatus.UNAUTHORIZED);
         response.getHeaders().add(HttpHeaders.CONTENT_TYPE, "application/json");
-
-        String body = "{\"error\": \"" + reason.replace("\"", "'") + "\"}";
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-
+        byte[] bytes = ("{\"error\": \"" + reason.replace("\"", "'") + "\"}").getBytes(StandardCharsets.UTF_8);
         return response.writeWith(Mono.just(response.bufferFactory().wrap(bytes)));
     }
 
     @Override
     public int getOrder() {
-        // Run early - before the request is routed to a downstream service.
-        return -1;
+        return -1; // after BlacklistFilter (-2), before ApiKeyAuthenticationFilter (0)
     }
 }

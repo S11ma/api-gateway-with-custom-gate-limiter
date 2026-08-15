@@ -64,6 +64,6 @@ public class ApiKeyAuthenticationFilter implements GlobalFilter, Ordered {
 
     @Override
     public int getOrder() {
-        return 0; // after LoggingFilter (-2) and JwtAuthenticationFilter (-1)
+        return 0; // after JwtAuthenticationFilter (-1), before RateLimitingFilter (1)
     }
 }

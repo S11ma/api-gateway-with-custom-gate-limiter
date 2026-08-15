@@ -5,10 +5,6 @@ spring:
   application:
     name: auth-service
 
-# This secret MUST match the one in gateway-service/application.yml -
-# both services sign/verify with the same HMAC key (symmetric signing).
-# In a real deployment this would come from a config server or vault,
-# never checked into git as plaintext.
 jwt:
-  secret: 8C+847MpsW3qHYF/6/7hrFPyxYwRuMzzbkoWVDUq1DE=
+  secret: LihuJumIzQKtnoQfCNyxmZ00fDFsbFzib5MTAV771F8=
   expiration-ms: 3600000

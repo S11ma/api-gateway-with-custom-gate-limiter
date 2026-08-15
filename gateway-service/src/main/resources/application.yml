@@ -21,6 +21,10 @@ spring:
           uri: http://localhost:8082
           predicates:
             - Path=/products/**
+  data:
+    redis:
+          host: localhost
+          port: 6379
 
 management:
   endpoints:
@@ -31,9 +35,21 @@ management:
 # Must match auth-service/application.yml exactly - both services sign/
 # verify JWTs with this same HMAC key.
 jwt:
-  secret: 8C+847MpsW3qHYF/6/7hrFPyxYwRuMzzbkoWVDUq1DE=
+  secret: LihuJumIzQKtnoQfCNyxmZ00fDFsbFzib5MTAV771F8=
 
 api:
   keys:
     mobile-app-key-123: mobile-app
     partner-x-key-456: partner-x
+
+blacklist:
+  ips: []
+  api-keys: []
+
+# Fixed window rate limiter (Stage 5). Key = username:client, e.g.
+# "seema:mobile-app". Low limit here on purpose, for easy testing -
+# raise it once you've confirmed the 429 behavior works.
+rate-limit:
+  strategy: redis
+  max-requests: 5
+  window-seconds: 60
