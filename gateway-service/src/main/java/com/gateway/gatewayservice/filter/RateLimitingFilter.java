@@ -1,7 +1,7 @@
 package com.gateway.gatewayservice.filter;
 
 import com.gateway.gatewayservice.config.RateLimiterProperties;
-import com.gateway.gatewayservice.ratelimit.FixedWindowRateLimiter;
+import com.gateway.gatewayservice.metrics.GatewayMetrics;
 import com.gateway.gatewayservice.ratelimit.RateLimiter;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
@@ -29,10 +29,12 @@ public class RateLimitingFilter implements GlobalFilter, Ordered {
 
     private final RateLimiter rateLimiter;
     private final RateLimiterProperties properties;
+    private final GatewayMetrics metrics;
 
-    public RateLimitingFilter(RateLimiter rateLimiter, RateLimiterProperties properties) {
+    public RateLimitingFilter(RateLimiter rateLimiter, RateLimiterProperties properties, GatewayMetrics metrics) {
         this.rateLimiter = rateLimiter;
         this.properties = properties;
+        this.metrics = metrics;
     }
 
     @Override
@@ -53,8 +55,14 @@ public class RateLimitingFilter implements GlobalFilter, Ordered {
         return rateLimiter.isAllowed(rateLimitKey, properties.getMaxRequests(), windowMillis)
                 .flatMap(allowed -> allowed
                         ? chain.filter(exchange)
-                        : tooManyRequests(exchange, rateLimitKey));
+                        : recordAndReject(exchange, rateLimitKey));
     }
+
+    private Mono<Void> recordAndReject(ServerWebExchange exchange, String key) {
+        metrics.recordRateLimitRejection();
+        return tooManyRequests(exchange, key);
+    }
+
     private boolean isPublicPath(String path) {
         return PUBLIC_PATHS.stream().anyMatch(path::startsWith);
     }

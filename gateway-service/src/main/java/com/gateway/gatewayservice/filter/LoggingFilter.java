@@ -1,5 +1,6 @@
 package com.gateway.gatewayservice.filter;
 
+import com.gateway.gatewayservice.metrics.GatewayMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -16,10 +17,17 @@ public class LoggingFilter implements GlobalFilter, Ordered {
 
     private static final Logger log = LoggerFactory.getLogger(LoggingFilter.class);
 
+    private final GatewayMetrics metrics;
+
+    public LoggingFilter(GatewayMetrics metrics) {
+        this.metrics = metrics;
+    }
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         long startTime = System.currentTimeMillis();
+        metrics.recordRequest();
 
         log.info("--> {} {} from {}",
                 request.getMethod(), request.getURI().getPath(), request.getRemoteAddress());
@@ -30,6 +38,10 @@ public class LoggingFilter implements GlobalFilter, Ordered {
             log.info("<-- {} {} status={} ({} ms)",
                     request.getMethod(), request.getURI().getPath(),
                     response.getStatusCode(), durationMs);
+
+            if (response.getStatusCode() != null && response.getStatusCode().is2xxSuccessful()) {
+                metrics.recordForwarded();
+            }
         }));
     }
 

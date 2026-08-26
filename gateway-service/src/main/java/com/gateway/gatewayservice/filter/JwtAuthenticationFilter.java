@@ -1,5 +1,6 @@
 package com.gateway.gatewayservice.filter;
 
+import com.gateway.gatewayservice.metrics.GatewayMetrics;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -29,6 +30,12 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     @Value("${jwt.secret}")
     private String secret;
 
+    private final GatewayMetrics metrics;
+
+    public JwtAuthenticationFilter(GatewayMetrics metrics) {
+        this.metrics = metrics;
+    }
+
     private Key signingKey() {
         byte[] keyBytes = Decoders.BASE64.decode(secret);
         return Keys.hmacShaKeyFor(keyBytes);
@@ -45,6 +52,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            metrics.recordJwtRejection();
             return unauthorized(exchange, "Missing or malformed Authorization header");
         }
 
@@ -69,6 +77,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange.mutate().request(mutatedRequest).build());
 
         } catch (JwtException | IllegalArgumentException e) {
+            metrics.recordJwtRejection();
             return unauthorized(exchange, "Invalid or expired token: " + e.getMessage());
         }
     }

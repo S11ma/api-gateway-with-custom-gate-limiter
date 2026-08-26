@@ -1,43 +1,54 @@
 # API Gateway with Custom Rate Limiter
 
-A Spring Cloud Gateway built incrementally, stage by stage, from basic
-routing up to a distributed, blacklist-aware, metrics-exposing gateway
-with four different rate limiting algorithms.
+A Spring Cloud Gateway, built one deliberate stage at a time — from
+routing two requests correctly, up through JWT/API-key auth, blacklisting,
+and four different rate limiting algorithms, to a metrics endpoint that
+shows exactly what the gateway is doing at any moment.
 
-## Roadmap
+Nothing here was generated as a finished system. Each stage exists because
+the one before it exposed a real gap, and the git history follows that
+same order. See `docs/HLD.md` for the full architecture writeup — this
+README is the practical "how to run and test it" companion.
 
-- [x] 1. Basic Gateway - route requests to backend services
+## Roadmap — all 10 stages complete
+
+- [x] 1. Basic Gateway
 - [x] 2. JWT Authentication Filter
 - [x] 3. API Key Validation
 - [x] 4. Request Logging
 - [x] 9. Blacklist Support *(built ahead of schedule, alongside auth)*
 - [x] 5. In-Memory Fixed Window Rate Limiter
-- [ ] 6. Redis-Based Fixed Window (distributed)
-- [ ] 7. Sliding Window Rate Limiter
-- [ ] 8. Token Bucket Implementation
-- [ ] 10. Metrics & Monitoring
-
-See `docs/HLD.md` for the full architecture writeup and diagrams.
+- [x] 6. Redis-Based Fixed Window (distributed)
+- [x] 7. Sliding Window Rate Limiter
+- [x] 8. Token Bucket Implementation
+- [x] 10. Metrics & Monitoring
 
 ## Modules
 
-- `gateway-service` - Spring Cloud Gateway, port 8080. The single entry point.
-- `auth-service` - issues JWTs after checking hardcoded credentials, port 8083.
-- `order-service` - dummy backend, port 8081.
-- `product-service` - dummy backend, port 8082.
+| Module | Port | What it does |
+|---|---|---|
+| `gateway-service` | 8080 | The single entry point — routing, logging, blacklist, auth, rate limiting, metrics |
+| `auth-service` | 8083 | Checks credentials, issues signed JWTs |
+| `order-service` | 8081 | Dummy backend, returns order data |
+| `product-service` | 8082 | Dummy backend, returns product data |
 
-## Gateway filter chain (in order)
+## Prerequisites
 
-1. **LoggingFilter** (order `-3`) - wraps everything, logs every request in and every response out.
-2. **BlacklistFilter** (order `-2`) - rejects blacklisted IPs/API keys with `403`, before any auth work happens.
-3. **JwtAuthenticationFilter** (order `-1`) - validates the `Authorization: Bearer` token, `401` if missing/invalid.
-4. **ApiKeyAuthenticationFilter** (order `0`) - validates `X-API-Key`, `401` if missing/invalid.
-5. **RateLimitingFilter** (order `1`) - enforces the fixed window limit per `username:client`, `429` if exceeded.
-6. Route forwarding to the matched backend service.
+- Java 17
+- Maven
+- Docker (for Redis, used from Stage 6 onward)
 
 ## Running everything
 
-Each module is an independent Maven project. Open four terminals:
+Start Redis first, since the gateway's rate limiter (in its `redis`,
+`sliding`, or `token-bucket` modes) depends on it:
+
+```bash
+docker run --name rl-redis -p 6379:6379 -d redis:7-alpine
+docker exec -it rl-redis redis-cli ping   # should print PONG
+```
+
+Then open four terminals:
 
 ```bash
 cd order-service && mvn spring-boot:run
@@ -52,44 +63,79 @@ cd auth-service && mvn spring-boot:run
 cd gateway-service && mvn spring-boot:run
 ```
 
-## Testing routing (Stage 1)
+## How the pieces fit together, in the order they were built
+
+### 1. Routing works first, with zero Java code
 
 ```bash
 curl http://localhost:8080/orders
 curl http://localhost:8080/products
 ```
 
-## Testing JWT + API key auth (Stages 2-3)
+Both should return JSON tagged with `"service": "order-service"` or
+`"service": "product-service"` — proof the request went in through 8080
+and came back from the right backend. Routing is entirely declarative,
+defined in `gateway-service/application.yml` as path-matching rules; no
+filter or controller handles it.
+
+### 2 & 3. Getting a token, and calling a protected route
 
 ```bash
-# 1. Log in to get a token
+# Log in through the gateway (auth-service is routed to, same as everything else)
 curl -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "seema", "password": "password123"}'
 
-# 2. Call a protected route with both headers
+# Copy the returned token, then call a protected route with BOTH headers
 TOKEN="paste-token-here"
 curl -i http://localhost:8080/orders \
   -H "Authorization: Bearer $TOKEN" \
   -H "X-API-Key: mobile-app-key-123"
 ```
 
-Demo users: `seema` / `password123` (roles USER, ADMIN), `guest` / `guestpass` (role USER).
-Demo API keys: `mobile-app-key-123` (client `mobile-app`), `partner-x-key-456` (client `partner-x`).
+Try dropping either header one at a time — each should independently
+cause a `401`, confirming the two auth layers are genuinely separate
+checks, not one covering for the other.
 
-## Testing the blacklist (Stage 9)
+**Demo accounts:** `seema` / `password123` (roles `USER, ADMIN`), `guest`
+/ `guestpass` (role `USER`).
+**Demo API keys:** `mobile-app-key-123` → client `mobile-app`,
+`partner-x-key-456` → client `partner-x`.
 
-Add a value to `blacklist.ips` or `blacklist.api-keys` in
-`gateway-service/application.yml`, restart the gateway, then confirm a
-matching request gets `403` instead of proceeding to auth checks at all.
+### 4. Watching the logs
 
-## Testing the rate limiter (Stage 5)
+Every request produces a matched pair of lines in the gateway's console —
+`-->` when it arrives, `<--` when a response is on its way out, including
+the status code and how long it took. Trigger a `401` (bad token) and a
+`200` (valid one) back to back and compare the two log pairs — both get
+logged, since the logging filter wraps every other filter, not just the
+successful path.
 
-The default limit is deliberately low for easy testing: **5 requests per
-60-second window**, per `username:client` combination.
+### 9. Blacklisting
+
+Add an entry to `blacklist.ips` or `blacklist.api-keys` in
+`gateway-service/application.yml`, restart the gateway, and confirm a
+matching request now gets `403` — and gets it *before* the auth filters
+even run (the point of putting blacklist first: reject known-bad callers
+cheaply, before spending effort validating their credentials).
+
+### 5-8. The four rate limiters
+
+All four live behind one interface and are switched with a single config
+value — no code changes needed to swap between them:
+
+```yaml
+rate-limit:
+  strategy: memory   # memory | redis | sliding | token-bucket
+  max-requests: 5
+  window-seconds: 60
+```
+
+**Fixed window (`memory` or `redis`)** — a straightforward "N requests
+per clock-aligned minute" cap. Test it by firing more than the limit
+quickly:
 
 ```bash
-# Fire more than 5 requests quickly with the same token + API key
 for i in 1 2 3 4 5 6; do
   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/orders \
     -H "Authorization: Bearer $TOKEN" \
@@ -97,43 +143,93 @@ for i in 1 2 3 4 5 6; do
 done
 ```
 
-Expect `200` for the first 5, then `429` for the 6th. Wait until the next
-60-second window rolls over (aligned to the clock, not to when you started
-sending requests) and the count resets.
+Expect five `200`s and a `429`. With `strategy: redis`, you can peek at
+the shared counter directly:
 
-Try it again with a *different* API key (`partner-x-key-456`) using the
-same JWT - it should get its own fresh count of 5, since the key is
-`username:client`, not just `username`. This is what confirms the
-composite key is actually working, not just a single global counter.
+```bash
+docker exec -it rl-redis redis-cli KEYS "ratelimit:*"
+```
 
-## Why this works this way
+And prove it's genuinely distributed by running a second gateway instance
+on another port (`mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8090`)
+pointed at the same Redis — splitting your 6 test requests across both
+ports should still produce exactly one `429`, since both instances share
+the same counter.
 
-**Routing (Stage 1):** Spring Cloud Gateway matches requests against
-`predicates` (path patterns) and forwards to the matching route's `uri`.
+**Sliding window (`sliding`)** — fixes fixed window's edge-burst problem:
+sending a burst right at a window boundary no longer resets to a clean
+slate the instant the clock rolls over, since the previous window's count
+still weighs into the estimate for a while after. Time a burst near a
+minute boundary and compare behavior against `strategy: fixed`/`redis` to
+see the difference directly.
 
-**Auth (Stages 2-3):** `auth-service` and `gateway-service` share one HMAC
-secret for JWT signing/verification. On success, the JWT filter adds
-`X-Auth-Username`/`X-Auth-Roles` headers; the API key filter adds
-`X-Client-Name`. Backend services never see raw tokens or keys - they
-trust headers the gateway already resolved.
+**Token bucket (`token-bucket`)** — the odd one out: instead of a hard
+per-window cap, a bucket refills continuously and lets a quiet client
+burst freely up to its capacity. Fire 5 requests instantly (all succeed,
+6th doesn't), then wait about 12 seconds (one token's worth of refill
+time, at 5 tokens per 60 seconds) and send exactly one more — it should
+succeed, where a window-based limiter would still have you blocked until
+the entire window rolled over. That partial recovery is the whole point
+of this algorithm.
 
-**Blacklist (Stage 9):** runs before any auth work, on purpose - it's a
-cheap check that should reject known-bad callers before spending effort
-validating their (possibly still technically-valid) credentials. Uses
-`403` rather than `401`, since the caller isn't missing credentials, they're
-explicitly denied.
+```bash
+docker exec -it rl-redis redis-cli HGETALL "ratelimit:bucket:seema:mobile-app"
+```
 
-**Rate limiting (Stage 5):** the `FixedWindowRateLimiter` keeps one
-counter per key in a `ConcurrentHashMap`, each tracking its own window-start
-timestamp. Windows are clock-aligned (e.g. with a 60s window: `12:00:00-12:00:59`),
-not "60 seconds from this key's first request" - which is exactly what
-creates the edge-burst problem Stage 7 (sliding window) fixes later. This
-implementation only works correctly for a single gateway instance - all
-its state lives in that one JVM's memory. Stage 6 replaces the in-memory
-map with Redis specifically to fix that, once you're running more than
-one gateway instance.
+### 10. Metrics
 
-## Next stage
+```bash
+curl http://localhost:8080/actuator/gatewaystats
+```
 
-Stage 6 moves the rate limiter's counter storage from the in-memory map
-into Redis, so the limit holds correctly across multiple gateway instances.
+Returns every rejection reason and total/forwarded counts in one JSON
+response:
+
+```json
+{
+  "totalRequests": 12,
+  "forwardedRequests": 7,
+  "rejections": {
+    "blacklist": 0,
+    "jwt": 2,
+    "apiKey": 1,
+    "rateLimit": 2
+  }
+}
+```
+
+Send a deliberate mix of good and bad requests, then check this endpoint
+— the numbers should match exactly what you sent, which is the actual
+test here: not just "does the endpoint respond," but "are the counts
+correct."
+
+## Project structure
+
+```
+api-gateway-rl/
+├── gateway-service/     - the gateway itself: routing, all filters, rate limiters, metrics
+├── auth-service/        - issues JWTs
+├── order-service/       - dummy backend
+├── product-service/     - dummy backend
+└── docs/
+    └── HLD.md            - full architecture writeup, stage by stage
+```
+
+Inside `gateway-service`:
+
+```
+src/main/java/com/gateway/gatewayservice/
+├── filter/          - the 5 GlobalFilters, in execution order via getOrder()
+├── ratelimit/        - RateLimiter interface + 4 implementations
+├── config/           - @ConfigurationProperties classes (API keys, blacklist, rate limit)
+└── metrics/           - GatewayMetrics + the custom /actuator/gatewaystats endpoint
+```
+
+## A note on what's intentionally left out
+
+This project stops short of a few things a production gateway would need
+— no persistent user/API-key database (config-backed instead), no
+Lua-script atomicity fix for the Redis rate limiters' two-step
+increment-then-expire, no TLS, no service discovery. Those aren't
+oversights; they're outside what this project set out to demonstrate.
+`docs/HLD.md` §8 states them explicitly rather than leaving them implicit.

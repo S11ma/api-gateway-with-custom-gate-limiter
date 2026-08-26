@@ -1,6 +1,7 @@
 package com.gateway.gatewayservice.filter;
 
 import com.gateway.gatewayservice.config.BlacklistProperties;
+import com.gateway.gatewayservice.metrics.GatewayMetrics;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -20,9 +21,11 @@ public class BlacklistFilter implements GlobalFilter, Ordered {
     private static final String API_KEY_HEADER = "X-API-Key";
 
     private final BlacklistProperties blacklistProperties;
+    private final GatewayMetrics metrics;
 
-    public BlacklistFilter(BlacklistProperties blacklistProperties) {
+    public BlacklistFilter(BlacklistProperties blacklistProperties, GatewayMetrics metrics) {
         this.blacklistProperties = blacklistProperties;
+        this.metrics = metrics;
     }
 
     @Override
@@ -31,12 +34,14 @@ public class BlacklistFilter implements GlobalFilter, Ordered {
         String callerIp = remoteAddress != null ? remoteAddress.getAddress().getHostAddress() : null;
 
         if (callerIp != null && blacklistProperties.getIps().contains(callerIp)) {
+            metrics.recordBlacklistRejection();
             return forbidden(exchange, "Your IP address has been blocked");
         }
 
         String apiKey = exchange.getRequest().getHeaders().getFirst(API_KEY_HEADER);
 
         if (apiKey != null && blacklistProperties.getApiKeys().contains(apiKey)) {
+            metrics.recordBlacklistRejection();
             return forbidden(exchange, "This API key has been revoked");
         }
 

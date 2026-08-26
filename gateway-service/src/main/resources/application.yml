@@ -30,7 +30,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: gateway,health,info
+        include: gateway,health,info,metrics,gatewaystats
 
 # Must match auth-service/application.yml exactly - both services sign/
 # verify JWTs with this same HMAC key.
@@ -49,7 +49,14 @@ blacklist:
 # Fixed window rate limiter (Stage 5). Key = username:client, e.g.
 # "seema:mobile-app". Low limit here on purpose, for easy testing -
 # raise it once you've confirmed the 429 behavior works.
+
+# Rate limiter - strategy switches which RateLimiter bean is active via
+# @ConditionalOnProperty, no code changes needed to swap algorithms:
+#   memory       -> Stage 5, in-memory fixed window
+#   redis        -> Stage 6, Redis-backed fixed window (distributed)
+#   sliding      -> Stage 7, Redis sliding window counter
+#   token-bucket -> Stage 8, Redis token bucket
 rate-limit:
-  strategy: redis
+  strategy: token-bucket
   max-requests: 5
   window-seconds: 60

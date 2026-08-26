@@ -1,6 +1,7 @@
 package com.gateway.gatewayservice.filter;
 
 import com.gateway.gatewayservice.config.ApiKeyProperties;
+import com.gateway.gatewayservice.metrics.GatewayMetrics;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -22,9 +23,11 @@ public class ApiKeyAuthenticationFilter implements GlobalFilter, Ordered {
     private static final List<String> PUBLIC_PATHS = List.of("/auth/");
 
     private final ApiKeyProperties apiKeyProperties;
+    private final GatewayMetrics metrics;
 
-    public ApiKeyAuthenticationFilter(ApiKeyProperties apiKeyProperties) {
+    public ApiKeyAuthenticationFilter(ApiKeyProperties apiKeyProperties, GatewayMetrics metrics) {
         this.apiKeyProperties = apiKeyProperties;
+        this.metrics = metrics;
     }
 
     @Override
@@ -38,6 +41,7 @@ public class ApiKeyAuthenticationFilter implements GlobalFilter, Ordered {
         String apiKey = exchange.getRequest().getHeaders().getFirst(API_KEY_HEADER);
 
         if (apiKey == null || !apiKeyProperties.getKeys().containsKey(apiKey)) {
+            metrics.recordApiKeyRejection();
             return unauthorized(exchange, "Missing or invalid API key");
         }
 
