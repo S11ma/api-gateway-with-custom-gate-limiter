@@ -19,6 +19,12 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Run tests with coverage
+        run: |
+          for module in gateway-service auth-service order-service product-service; do
+            (cd "$module" && mvn -B test)
+          done
+
       - name: Compile all four modules
         run: |
           for module in gateway-service auth-service order-service product-service; do
