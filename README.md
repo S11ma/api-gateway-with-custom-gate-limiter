@@ -1,5 +1,7 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=s11ma_api-gateway-rl&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=s11ma_api-gateway-rl)
 
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=s11ma_api-gateway-rl&metric=coverage)](https://sonarcloud.io/summary/new_code?id=s11ma_api-gateway-rl)
+
 # API Gateway with Custom Rate Limiter
 
 A Spring Cloud Gateway, built one deliberate stage at a time — from
