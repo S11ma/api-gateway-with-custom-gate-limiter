@@ -96,6 +96,6 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
     @Override
     public int getOrder() {
-        return -1; // after BlacklistFilter (-2), before ApiKeyAuthenticationFilter (0)
+        return -1;
     }
 }
